@@ -10,7 +10,6 @@ node_modules/
 dist/
 dist-test/
 /test/
-/ui/
 coverage/
 .nyc_output/
 *.tsbuildinfo

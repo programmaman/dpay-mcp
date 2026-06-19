@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Two-Agent Demo — Disputable Payments</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top-bar">
+    <h1>🤖 Two-Agent Demo</h1>
+    <span class="status-badge" id="status-badge">⏳ Connecting...</span>
+  </header>
+
+  <div class="dashboard">
+    <!-- LEFT: Agent Chat -->
+    <section class="panel chat-panel" id="chat-panel">
+      <h2>💬 Agent Conversation</h2>
+      <div class="chat-feed" id="chat-feed"></div>
+    </section>
+
+    <!-- CENTER: Escrow State -->
+    <section class="panel escrow-panel" id="escrow-panel">
+      <h2>🔒 Escrow Contract</h2>
+      <div class="escrow-card" id="escrow-card">
+        <div class="escrow-empty">Waiting for payment creation...</div>
+      </div>
+    </section>
+
+    <!-- RIGHT: Blockchain Timeline -->
+    <section class="panel timeline-panel" id="timeline-panel">
+      <h2>⛓️ Blockchain Timeline</h2>
+      <div class="timeline-feed" id="timeline-feed"></div>
+      <h3 style="margin-top: 1rem">📋 Live Activity Feed</h3>
+      <div class="activity-feed" id="activity-feed"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
