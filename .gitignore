@@ -1,0 +1,41 @@
+# OS / editor cruft
+.DS_Store
+.idea/
+.vscode/
+
+# Dependency installs
+node_modules/
+
+# Build output
+dist/
+dist-test/
+/test/
+/ui/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# Generated TypeChain (regenerated via npm run regenerate)
+generated/typechain/
+
+# Environment files (may contain private keys / RPC credentials)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test harness temp dirs
+tmp/
+
+# Debug / session logs
+debug-logs/
+/mcp-docs/
+/agent-session-logging.todo.md
+/design-scope.md
+/reason-log.md

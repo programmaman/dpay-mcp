@@ -1,0 +1,66 @@
+{
+  "name": "dpay-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Disputable Payments — lets AI agents create, settle, dispute, and refund Ethereum escrows on-chain",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/programmaman/dpay-mcp.git"
+  },
+  "homepage": "https://github.com/programmaman/dpay-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/programmaman/dpay-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "dpay-mcp": "./dist/src/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "start": "tsc && node dist/src/index.js",
+    "dev": "tsx src/index.ts",
+    "agent": "tsx test/agent/agent-client.ts",
+    "demo:two-agent": "npm run build && tsx test/agent/two-agent-demo.ts",
+    "demo:openai": "npm run build && tsx test/agent/two-agent-openai.ts",
+    "demo:server": "tsx src/demo/demo-server.ts",
+    "test:up": "docker compose -f test/docker-compose.yml up -d",
+    "test:down": "docker compose -f test/docker-compose.yml down",
+    "test:logs": "docker compose -f test/docker-compose.yml logs -f ollama",
+    "test:ping": "tsx test/ping.test.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && tsx test/ping.test.ts && vitest run test/create-payment.test.ts test/lifecycle.test.ts test/dispute.test.ts",
+    "inspector": "npx @modelcontextprotocol/inspector tsx src/index.ts"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@rakelabs/dpayments-sdk": "^0.1.0",
+    "@rakelabs/evidence-publisher": "^0.1.0",
+    "ethers": "^6.10.0",
+    "express": "^5.2.1",
+    "json5": "^2.2.3",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.2",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.6"
+  }
+}
