@@ -22,6 +22,9 @@ generated/typechain/
 .env.local
 .env.*.local
 
+# Personal notes
+lessons.md
+
 # Logs
 *.log
 npm-debug.log*
