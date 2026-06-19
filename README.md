@@ -82,8 +82,6 @@ Restart your client. Ask your agent:
 I want to do business on chain, what's your wallet address?
 ```
 
-The server starts in ~2 seconds. No build step needed.
-
 ## More Client Options
 
 ### Inline values (less secure)
