@@ -1,5 +1,5 @@
 {
-  "name": "dpay-mcp",
+  "name": "@rakelabs/dpay-mcp",
   "version": "0.1.0",
   "description": "MCP server for Disputable Payments — lets AI agents create, settle, dispute, and refund Ethereum escrows on-chain",
   "type": "module",
