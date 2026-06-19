@@ -24,8 +24,11 @@
   ],
   "scripts": {
     "build": "tsc",
+    "clean": "rm -rf dist dist-test coverage",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "start": "tsc && node dist/src/index.js",
     "dev": "tsx src/index.ts",
     "agent": "tsx test/agent/agent-client.ts",
@@ -56,11 +59,14 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.2",
     "@types/ws": "^8.18.1",
+    "eslint": "^10.5.0",
     "tsx": "^4.22.0",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1",
     "vitest": "^3.2.6"
   }
 }
