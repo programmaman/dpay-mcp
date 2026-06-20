@@ -75,7 +75,7 @@ export class PaymentStore {
       }
     } catch (err) {
       // Corrupted file — start fresh
-      process.stderr.write(`[dpay-mcp] ⚠ Failed to load payments.json: ${err}\n`);
+      process.stderr.write(`[dpay-mcp] ⚠ Failed to load payments.json: ${String(err)}\n`);
     }
   }
 
@@ -87,7 +87,7 @@ export class PaymentStore {
       }
       await writeFile(this.filePath, JSON.stringify(obj, null, 2), 'utf8');
     } catch (err) {
-      process.stderr.write(`[dpay-mcp] ⚠ Failed to write payments.json: ${err}\n`);
+      process.stderr.write(`[dpay-mcp] ⚠ Failed to write payments.json: ${String(err)}\n`);
     }
   }
 }

@@ -100,7 +100,7 @@ async function main(): Promise<void> {
       logger.info(`wallet key saved to ${keyPath}`);
       logger.info(`  → Set PRIVATE_KEY env var on next server start to reuse this wallet`);
     } catch (err) {
-      logger.warn(`could not save wallet key to ${keyPath}: ${err}`);
+      logger.warn(`could not save wallet key to ${keyPath}: ${String(err)}`);
       logger.warn(`  → SAVE THIS KEY TO REUSE THIS WALLET: ${wallet.privateKey}`);
     }
   }
@@ -152,7 +152,7 @@ async function main(): Promise<void> {
   server.registerResource(
       'payment',
       new ResourceTemplate('dpay://payments/{paymentAddress}', {
-        list: async () => ({
+        list: () => ({
           resources: store.list().map(r => ({
             uri: `dpay://payments/${r.paymentAddress}`,
             name: `${r.paymentAddress.slice(0, 10)}… (${r.state})`,
@@ -160,7 +160,7 @@ async function main(): Promise<void> {
         }),
       }),
       { title: 'Payment Record', description: 'Cached payment state and metadata', mimeType: 'application/json' },
-      async (uri, { paymentAddress }) => {
+      (uri, { paymentAddress }) => {
         const address = Array.isArray(paymentAddress) ? paymentAddress[0] : paymentAddress;
         return {
           contents: [{
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
       'payment-list',
       'dpay://payments',
       { title: 'All Payments', description: 'List of all tracked payments', mimeType: 'application/json' },
-      async (uri) => ({
+      (uri) => ({
         contents: [{
           uri: uri.href,
           text: JSON.stringify(store.list(), null, 2),
@@ -195,20 +195,16 @@ async function main(): Promise<void> {
         inputSchema: PingSchema,
       },
       async () => {
-        // Pre-warm token details cache: after whoami, validate() has zero RPC latency
-        const addresses = enforcer.allowedTokenAddresses;
-        const tokens = addresses.length > 0
-          ? await Promise.all(addresses.map(a => enforcer.getTokenBudgetConfig(a)))
-          : [];
+        const limits = await enforcer.humanReadableLimits();
         return {
           content: [{ type: 'text', text: JSON.stringify({
               status: 'ok',
               yourWallet: wallet.address,
               chainId,
               factory: signer.factoryAddress,
-              tokens: tokens.filter(t => t !== null),
+              spendingLimits: limits,
               minSettlementWindowSec: enforcer.minSettlementWindowSec || undefined,
-            }, (_k, v) => typeof v === 'bigint' ? v.toString() : v) }],
+            }) }],
         };
       },
   );
@@ -222,10 +218,10 @@ async function main(): Promise<void> {
             'Usage: { payeeAddress: <RECIPIENT_ADDRESS>, etherAmount: <AMOUNT>, settlementWindowSec: <SECONDS> }',
         inputSchema: CreatePaymentSchema,
       },
-      async (args) => {
+        async (args: Record<string, unknown>) => {
         try {
           const parsed = CreatePaymentSchema.parse(args);
-          const policy = await checkPolicy('eth_create_payment', args as Record<string, unknown>, wallet.address, chainId);
+          const policy = await checkPolicy('eth_create_payment', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           const net = converter.ethToWei(parsed.etherAmount);
           const { blockNumber, blockTs, settlementTimeUnixSec } = await converter.settlementTimestamp(parsed.settlementWindowSec);
@@ -274,17 +270,17 @@ async function main(): Promise<void> {
         description: 'Returns the full on-chain state for a payment: current state, payer, payee, amount, token, settlement deadline. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
         inputSchema: PaymentAddressSchema,
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         try {
           const parsed = PaymentAddressSchema.parse(args);
           const info = await signer.readPayment(parsed.paymentAddress);
 
           // Auto-refresh cached state from on-chain
-          const stateName = STATE_NAMES[info.state as number] ?? 'UNKNOWN';
+          const stateName = STATE_NAMES[Number(info.state)] ?? 'UNKNOWN';
           await store.upsert(parsed.paymentAddress, { state: stateName });
 
           return {
-            content: [{ type: 'text', text: JSON.stringify(info, (_k, v) => typeof v === 'bigint' ? v.toString() : v, 2) }],
+            content: [{ type: 'text', text: JSON.stringify(info, (_k: string, v: unknown) => typeof v === 'bigint' ? v.toString() : v, 2) }],
           };
         } catch (error: unknown) {
           return { content: [{ type: 'text', text: `payment_info failed: ${formatRevert(error)}` }], isError: true };
@@ -299,10 +295,10 @@ async function main(): Promise<void> {
         description: 'Raises a Kleros dispute (on-chain arbitration). Only valid when payment is PAID and settlement time has NOT passed. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
         inputSchema: PaymentAddressSchema,
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         try {
           const parsed = PaymentAddressSchema.parse(args);
-          const policy = await checkPolicy('raise_dispute', args as Record<string, unknown>, wallet.address, chainId);
+          const policy = await checkPolicy('raise_dispute', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           const result = await signer.raiseDispute(parsed.paymentAddress);
 
@@ -334,10 +330,10 @@ async function main(): Promise<void> {
         description: 'Creates an evidence record and submits it to the dispute on-chain. Only valid when payment is DISPUTED. Usage: { paymentAddress: <PAYMENT_ADDRESS>, argument: <ARGUMENT> }',
         inputSchema: SubmitEvidenceSchema,
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         try {
           const parsed = SubmitEvidenceSchema.parse(args);
-          const policy = await checkPolicy('submit_evidence', args as Record<string, unknown>, wallet.address, chainId);
+          const policy = await checkPolicy('submit_evidence', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           const argument = parsed.argument ?? 'No additional details provided.';
           logger.info(`submit_evidence: address=${parsed.paymentAddress}${parsed.argument ? ` argument=${parsed.argument}` : ''}`);
@@ -387,10 +383,10 @@ async function main(): Promise<void> {
         description: 'Settle or claim the payment funds to your wallet after the settlement window has passed. Only the PAYEE can call this. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
         inputSchema: PaymentAddressSchema,
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         try {
           const parsed = PaymentAddressSchema.parse(args);
-          const policy = await checkPolicy('settle', args as Record<string, unknown>, wallet.address, chainId);
+          const policy = await checkPolicy('settle', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           logger.info(`settle: paymentAddress=${parsed.paymentAddress}`);
           logger.info(`settle: signer wallet=${wallet.address}`);
@@ -424,10 +420,10 @@ async function main(): Promise<void> {
         description: 'Voluntarily send the funds back to the payer. Only the PAYEE can call this. Only valid when payment is in PAID status. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
         inputSchema: PaymentAddressSchema,
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         try {
           const parsed = PaymentAddressSchema.parse(args);
-          const policy = await checkPolicy('refund', args as Record<string, unknown>, wallet.address, chainId);
+          const policy = await checkPolicy('refund', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           const result = await signer.voluntaryRefund(parsed.paymentAddress);
 
@@ -462,10 +458,10 @@ async function main(): Promise<void> {
             'Usage: { tokenAddress: <TOKEN_ADDRESS>, payeeAddress: <RECIPIENT_ADDRESS>, tokenAmount: <AMOUNT>, settlementWindowSec: <SECONDS> }',
         inputSchema: CreateErc20PaymentSchema,
       },
-      async (args) => {
+      async (args: Record<string, unknown>) => {
         try {
           const parsed = CreateErc20PaymentSchema.parse(args);
-          const policy = await checkPolicy('erc20_create_payment', args as Record<string, unknown>, wallet.address, chainId);
+          const policy = await checkPolicy('erc20_create_payment', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           const net = await converter.erc20ToBaseUnits(parsed.tokenAddress, parsed.tokenAmount);
           const { blockNumber, blockTs, settlementTimeUnixSec } = await converter.settlementTimestamp(parsed.settlementWindowSec);
@@ -538,13 +534,13 @@ async function main(): Promise<void> {
       await closeWorker();
       process.exit(0);
     } catch (err) {
-      logger.error(`Shutdown error: ${err}`);
+      logger.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   };
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 }
 
 process.on('unhandledRejection', (reason: unknown) => {

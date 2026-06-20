@@ -43,18 +43,18 @@ async function createInstance() {
       ? process.env['EVIDENCE_IPFS_GATEWAYS'].split(',').map(s => s.trim())
       : undefined;
 
-    const auth: Record<string, string> = authType === 'bearer'
-      ? { type: 'bearer', token: authToken }
+    const auth = authType === 'bearer'
+      ? { type: 'bearer' as const, token: authToken }
       : authType === 'basic'
-        ? { type: 'basic', username: process.env['EVIDENCE_IPFS_USERNAME'] ?? '', password: process.env['EVIDENCE_IPFS_PASSWORD'] ?? '' }
-        : { type: 'none' };
+        ? { type: 'basic' as const, username: process.env['EVIDENCE_IPFS_USERNAME'] ?? '', password: process.env['EVIDENCE_IPFS_PASSWORD'] ?? '' }
+        : { type: 'none' as const };
 
-    const headers = process.env['EVIDENCE_IPFS_HEADERS']
-      ? JSON.parse(process.env['EVIDENCE_IPFS_HEADERS'])
+    const headers: Record<string, string> | undefined = process.env['EVIDENCE_IPFS_HEADERS']
+      ? JSON.parse(process.env['EVIDENCE_IPFS_HEADERS']) as Record<string, string>
       : undefined;
 
-    const fields = process.env['EVIDENCE_IPFS_UPLOAD_FIELDS']
-      ? JSON.parse(process.env['EVIDENCE_IPFS_UPLOAD_FIELDS'])
+    const fields: Record<string, string> | undefined = process.env['EVIDENCE_IPFS_UPLOAD_FIELDS']
+      ? JSON.parse(process.env['EVIDENCE_IPFS_UPLOAD_FIELDS']) as Record<string, string>
       : undefined;
 
     const fileFieldName = process.env['EVIDENCE_IPFS_FILE_FIELD'];
@@ -65,7 +65,7 @@ async function createInstance() {
         provider: {
           name: endpoint,
           url: endpoint,
-          auth: auth as any,
+          auth,
           ...(headers ? { headers } : {}),
           ...(fields ? { fields } : {}),
           ...(fileFieldName ? { fileFieldName } : {}),
@@ -91,7 +91,7 @@ function withTimeout<T>(p: Promise<T>, ms = 180_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('Helia init timeout')), ms);
     p.then((v) => { clearTimeout(t); resolve(v); })
-     .catch((e) => { clearTimeout(t); reject(e); });
+     .catch((e: unknown) => { clearTimeout(t); reject(e instanceof Error ? e : new Error(String(e))); });
   });
 }
 
@@ -124,68 +124,85 @@ async function ensureReady(): Promise<void> {
 
 let initStarted = false;
 
-parentPort.on('message', async (msg) => {
-  try {
-    switch (msg.type) {
-      case 'init': {
-        if (initStarted) break;
-        initStarted = true;
-        try {
-          await ensureReady();
-          // ready means "Helia is initialized and publish is safe"
-          parentPort!.postMessage({ type: 'ready' });
-        } catch (err) {
-          initStarted = false;
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          parentPort!.postMessage({ type: 'init-error', error: errorMsg });
-        }
-        break;
-      }
+type WorkerIncomingMessage =
+  | { type: 'init' }
+  | { type: 'publish'; id: string; title: string; description: string }
+  | { type: 'close' };
 
-      case 'publish': {
-        await ensureReady();
-        if (!publisher) {
-          throw new Error('Publisher not initialized after ensureReady');
-        }
-        const result = await publisher.publish({
-          title: msg.title,
-          description: msg.description,
-        });
-        parentPort!.postMessage({
-          type: 'publish-done',
-          id: msg.id,
-          uri: result.document.uri,
-          cid: result.document.cid,
-          selfHash: result.selfHash,
-        });
-        break;
-      }
+parentPort.on('message', (raw: unknown) => {
+  const msg = raw as WorkerIncomingMessage;
+  const id = raw !== null && typeof raw === 'object' && 'id' in raw ? String((raw as Record<string, unknown>).id) : undefined;
 
-      case 'close': {
-        try {
-          if (publisher) {
-            await publisher.close();
-          }
-        } catch (closeErr) {
-          const msg = closeErr instanceof Error ? closeErr.message : String(closeErr);
-          log(`Warning: Helia failed to close cleanly: ${msg}`);
-        } finally {
-          // Always exit the process, even if closing the datastore failed
-          parentPort!.postMessage({ type: 'closed' });
-          process.exit(0);
-        }
-        break; // Technically unreachable, but good practice
-      }
-
-      default:
-        parentPort!.postMessage({
-          type: 'error',
-          id: msg.id,
-          error: `Unknown message type: ${msg.type}`,
-        });
-    }
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    parentPort!.postMessage({ type: 'error', id: msg.id, error: errorMsg });
+  // Handle unknown message types at top level so we can extract the id
+  if (typeof msg === 'object' && msg !== null && 'type' in msg &&
+      !['init', 'publish', 'close'].includes((msg as Record<string, unknown>).type as string)) {
+    parentPort!.postMessage({ type: 'error', id, error: `Unknown message type` });
+    return;
   }
+
+  handleMessage(msg).catch((err: unknown) => {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    parentPort!.postMessage({ type: 'error', id, error: errorMsg });
+  });
 });
+
+async function handleMessage(msg: WorkerIncomingMessage): Promise<void> {
+  switch (msg.type) {
+    case 'init': {
+      if (initStarted) break;
+      initStarted = true;
+      try {
+        await ensureReady();
+        // ready means "Helia is initialized and publish is safe"
+        parentPort!.postMessage({ type: 'ready' });
+      } catch (err) {
+        initStarted = false;
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        parentPort!.postMessage({ type: 'init-error', error: errorMsg });
+      }
+      break;
+    }
+
+    case 'publish': {
+      await ensureReady();
+      if (!publisher) {
+        throw new Error('Publisher not initialized after ensureReady');
+      }
+      const result = await publisher.publish({
+        title: msg.title,
+        description: msg.description,
+      });
+      parentPort!.postMessage({
+        type: 'publish-done',
+        id: msg.id,
+        uri: result.document.uri,
+        cid: result.document.cid,
+        selfHash: result.selfHash,
+      });
+      break;
+    }
+
+    case 'close': {
+      try {
+        if (publisher) {
+          await publisher.close();
+        }
+      } catch (closeErr) {
+        const closeMsg = closeErr instanceof Error ? closeErr.message : String(closeErr);
+        log(`Warning: Helia failed to close cleanly: ${closeMsg}`);
+      } finally {
+        // Always exit the process, even if closing the datastore failed
+        parentPort!.postMessage({ type: 'closed' });
+        process.exit(0);
+      }
+      break; // Technically unreachable, but good practice
+    }
+
+    default: {
+      parentPort!.postMessage({
+        type: 'error',
+        error: 'Unknown message type',
+      });
+    }
+  }
+}

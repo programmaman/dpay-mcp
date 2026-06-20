@@ -19,6 +19,15 @@ export interface PublishedEvidence {
   selfHash: string;
 }
 
+// ─── Worker message types ────────────────────────────────────────────────────
+
+type WorkerIncomingMessage =
+  | { type: 'log'; msg: string }
+  | { type: 'error'; id?: string; error: string }
+  | { type: 'publish-done'; id: string; uri: string; cid: string; selfHash: string }
+  | { type: 'ready' }
+  | { type: 'init-error'; error: string };
+
 // ─── Worker lifecycle ───────────────────────────────────────────────────────
 // IMPORTANT: The worker MUST be compiled to JS first (npm run build).
 // tsx cannot reliably serve as a Worker execArgv loader for the Helia tree.
@@ -53,7 +62,6 @@ const worker = new Worker(workerPath, { execArgv: workerExecArgv });
 let readyResolve: (() => void) | null = null;
 let readyReject: ((err: Error) => void) | null = null;
 let readyPromise: Promise<void> | null = null;
-let isDead = false;
 let isReady = false;
 
 function getReadyPromise(): Promise<void> {
@@ -75,12 +83,6 @@ function rejectReady(err: Error): void {
   readyReject = null;
 }
 
-function waitUntilReady(): Promise<void> {
-  if (isDead) return Promise.reject(new Error('Worker has exited and cannot be restarted'));
-  if (isReady) return Promise.resolve();
-  return getReadyPromise();
-}
-
 // ─── Pending request tracking ───────────────────────────────────────────────
 
 type PendingEntry = {
@@ -90,7 +92,9 @@ type PendingEntry = {
 
 const pending = new Map<string, PendingEntry>();
 
-worker.on('message', (msg) => {
+worker.on('message', (raw: unknown) => {
+  const msg = raw as WorkerIncomingMessage;
+
   // Log messages from worker go to stderr
   if (msg.type === 'log') {
     process.stderr.write(`[dpay-mcp] evidence-publisher: ${msg.msg}\n`);
@@ -98,10 +102,15 @@ worker.on('message', (msg) => {
   }
 
   if (msg.type === 'error') {
-    const entry = msg.id ? pending.get(msg.id) : undefined;
-    if (entry) {
-      pending.delete(msg.id);
-      entry.reject(new Error(msg.error));
+    const id = msg.id;
+    if (id) {
+      const entry = pending.get(id);
+      if (entry) {
+        pending.delete(id);
+        entry.reject(new Error(msg.error));
+      } else {
+        process.stderr.write(`[dpay-mcp] evidence-publisher: ✗ ${msg.error}\n`);
+      }
     } else {
       process.stderr.write(`[dpay-mcp] evidence-publisher: ✗ ${msg.error}\n`);
     }
@@ -109,9 +118,10 @@ worker.on('message', (msg) => {
   }
 
   if (msg.type === 'publish-done') {
-    const entry = pending.get(msg.id);
+    const id = msg.id;
+    const entry = pending.get(id);
     if (entry) {
-      pending.delete(msg.id);
+      pending.delete(id);
       entry.resolve({
         uri: msg.uri,
         cid: msg.cid,
@@ -132,7 +142,6 @@ worker.on('message', (msg) => {
     process.stderr.write(`[dpay-mcp] evidence-publisher: init failed: ${msg.error}\n`);
     // Worker is still alive — reset the gate so a new warmUp/init cycle can retry.
     isReady = false;
-    isDead = false;
     rejectReady(new Error(`Worker init failed: ${msg.error}`));
     return;
   }
@@ -145,7 +154,6 @@ worker.on('error', (err: unknown) => {
 
 worker.on('exit', (code) => {
   process.stderr.write(`[dpay-mcp] evidence-publisher: worker exited with code ${code}\n`);
-  isDead = true;
   rejectReady(new Error(`Worker exited with code ${code}`));
   // Reject all pending requests
   for (const [id, entry] of pending) {
@@ -164,8 +172,7 @@ export function warmUp(): void {
   // Prevent overwriting an active or already-completed startup
   if (isReady || readyPromise) return;
 
-  isDead = false;
-  getReadyPromise(); // Ensure promise exists before sending init
+  void getReadyPromise(); // Ensure promise exists before sending init
   worker.postMessage({ type: 'init' });
 }
 
@@ -199,7 +206,7 @@ export async function closeWorker(): Promise<void> {
 
     // Forceful fallback: terminate if the worker doesn't exit within 5 seconds
     setTimeout(() => {
-      worker.terminate();
+      void worker.terminate();
       resolve();
     }, 5000);
   });

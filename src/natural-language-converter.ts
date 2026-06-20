@@ -59,13 +59,13 @@ export class NaturalLanguageToChainConverter {
 
     const token = new ethers.Contract(address, ERC20_DETAILS_ABI, this.provider);
     const [decimalsResult, nameResult, symbolResult] = await Promise.allSettled([
-      token.decimals(),
-      token.name(),
-      token.symbol(),
+      token.decimals() as Promise<number>,
+      token.name() as Promise<string>,
+      token.symbol() as Promise<string>,
     ]);
 
     const details: TokenDetails = {
-      decimals: decimalsResult.status === 'fulfilled' ? Number(decimalsResult.value) : 18,
+      decimals: decimalsResult.status === 'fulfilled' ? decimalsResult.value : 18,
     };
     if (nameResult.status === 'fulfilled') details.name = nameResult.value;
     if (symbolResult.status === 'fulfilled') details.symbol = symbolResult.value;

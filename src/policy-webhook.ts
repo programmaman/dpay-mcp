@@ -76,7 +76,7 @@ export async function checkPolicy(
 
     return { allowed: isAllowed, reason };
 
-  } catch (err) {
+  } catch {
     log('error', `Policy webhook error or timeout — denying request to ${tool}`);
     return { allowed: false, reason: 'Policy check unreachable or timed out.' };
   }

@@ -131,13 +131,26 @@ export class ConfigEnforcer {
     return this._allowedTokens.length > 0 || this._minSettlementWindowSec > 0n;
   }
 
+  /** Human-readable limits enriched with token symbols for LLM consumption. */
+  async humanReadableLimits(): Promise<Array<{ token: string; budget: string; maxTxValue: string }>> {
+    return Promise.all(this._allowedTokens.map(async (t) => {
+      const details = await this.converter.getTokenDetails(t.address);
+      const symbol = details.symbol ?? t.address.slice(0, 10);
+      return {
+        token: symbol,
+        budget: `${t.budget} ${symbol}`,
+        maxTxValue: `${t.maxTxValue} ${symbol}`,
+      };
+    }));
+  }
+
   // ─── Validation ───────────────────────────────────────────────────
 
   async validate(input: Record<string, unknown>, tokenAddress: string): Promise<void> {
     this.checkAllowlist(tokenAddress);
     await this.resolveIfNeeded(tokenAddress);
     this.checkSettlementWindow(input);
-    await this.checkValue(input, tokenAddress);
+    this.checkValue(input, tokenAddress);
   }
 
   recordSpend(valueWei: bigint, tokenAddress: string): void {
@@ -246,17 +259,17 @@ export class ConfigEnforcer {
   }
 
   private parseValue(input: Record<string, unknown>): bigint | undefined {
-    const raw = (input as any).netAmountWei ?? (input as any).amountWei;
-    if (!raw) return undefined;
+    const raw = input['netAmountWei'] ?? input['amountWei'];
+    if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'bigint') return undefined;
     try {
-      const val = BigInt(String(raw));
+      const val = BigInt(raw);
       return val >= 0n ? val : undefined;
     } catch {
       return undefined;
     }
   }
 
-  private async checkValue(input: Record<string, unknown>, tokenAddress: string): Promise<void> {
+  private checkValue(input: Record<string, unknown>, tokenAddress: string): void {
     const valueWei = this.parseValue(input);
     if (valueWei === undefined) return;
 
@@ -290,12 +303,13 @@ export class ConfigEnforcer {
   }
 
   private checkSettlementWindow(input: Record<string, unknown>): void {
-    const raw = (input as any).settlementTimeUnixSec;
+    const raw = input['settlementTimeUnixSec'];
     if (!raw || this._minSettlementWindowSec === 0n) return;
 
+    if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'bigint') return;
     let settlementTime: bigint;
     try {
-      settlementTime = BigInt(String(raw));
+      settlementTime = BigInt(raw);
     } catch {
       return;
     }

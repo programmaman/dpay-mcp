@@ -110,7 +110,7 @@ export function formatRevert(error: unknown): string {
   const decoded = decodeCombined(data);
   if (decoded) {
     const args = Object.entries(decoded.args)
-      .map(([k, v]) => `${k}=${v}`)
+      .map(([k, v]) => `${k}=${String(v)}`)
       .join(', ');
     return `${decoded.error}${args ? ` (${args})` : ''}`;
   }

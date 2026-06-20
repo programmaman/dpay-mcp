@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { execPath } from 'node:process';
