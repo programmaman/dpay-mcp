@@ -2,7 +2,7 @@
 
 # dpay-mcp
 
-An MCP server for creating, settling, disputing, and refunding escrows on EVM chains.
+A MCP server for creating, settling, disputing, and refunding escrows on EVM chains.
 
 <p>
   <strong>AI agents call MCP tools.</strong> The server submits the on-chain transactions, so the agent never needs to hold a private key.
