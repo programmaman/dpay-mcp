@@ -150,44 +150,6 @@ npx can hang on Windows. Use `cmd /c` instead:
 }
 ```
 
-**VS Code:**
-
-```json
-{
-  "servers": {
-    "dpay": {
-      "type": "stdio",
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "@rakelabs/dpay-mcp"],
-      "env": {
-        "RPC_URL": "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY",
-        "CHAIN_ID": "1",
-        "PRIVATE_KEY": "0x...",
-        "ALLOWED_TOKENS": "ETH:0.1:0.01"
-      }
-    }
-  }
-}
-```
-
-### Docker
-
-```json
-{
-  "mcpServers": {
-    "dpay": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "rakelabs/dpay-mcp"],
-      "env": {
-        "RPC_URL": "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY",
-        "CHAIN_ID": "1",
-        "PRIVATE_KEY": "0x...",
-        "ALLOWED_TOKENS": "ETH:0.1:0.01"
-      }
-    }
-  }
-}
-```
 
 ### Other MCP Clients
 
