@@ -1,6 +1,6 @@
-import {ethers} from 'ethers';
-import type {PreparedTx} from '@rakelabs/dpayments-sdk';
-import {DPayments, getFactoryAddress} from '@rakelabs/dpayments-sdk';
+import { ethers, NonceManager } from 'ethers';
+import type { PreparedTx } from '@rakelabs/dpayments-sdk';
+import { DPayments, getFactoryAddress } from '@rakelabs/dpayments-sdk';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -46,33 +46,27 @@ export class DPaySigner {
   readonly walletAddress: string;
 
   /** Serial execution queue — guarantees broadcasts fire in order. */
-  private txQueue: Promise<any> = Promise.resolve();
-
-  /**
-   * Fetch the current on-chain nonce for this wallet.
-   * Always hits the RPC — no caching, no stale state, no poisoning.
-   * `pending` includes unconfirmed txs, giving us back-to-back nonces.
-   */
-  private async allocateNonces(count: number): Promise<number> {
-    return this.provider.getTransactionCount(this.walletAddress, 'pending');
-  }
+  private txQueue: Promise<unknown> = Promise.resolve();
 
   constructor(config: DPaySignerConfig) {
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl, config.chainId, {
       staticNetwork: true, // pin to the configured chain
     });
-    // Defensively connect the signer — some Signer implementations (hardware wallets,
-    // abstract signers) lack .connect(). Fall back to the raw signer if so.
-    this.signer = typeof (config.signer as any).connect === 'function'
-        ? (config.signer as any).connect(this.provider)
+
+    // Defensively connect the signer, then wrap it in the NonceManager to
+    // guarantee sequential nonces for back-to-back rapid broadcasts.
+    const connectedSigner = 'connect' in config.signer && typeof config.signer.connect === 'function'
+        ? config.signer.connect(this.provider)
         : config.signer;
+
+    this.signer = new NonceManager(connectedSigner);
     this.walletAddress = config.walletAddress;
 
     const factoryAddress = process.env.FACTORY_ADDRESS ?? getFactoryAddress(config.chainId);
     if (!factoryAddress) {
       throw new Error(
-        `No known factory deployment for chain ID ${config.chainId}. ` +
-        `Set FACTORY_ADDRESS env var or check listDeployments().`,
+          `No known factory deployment for chain ID ${config.chainId}. ` +
+          `Set FACTORY_ADDRESS env var or check listDeployments().`,
       );
     }
     this.factoryAddress = factoryAddress;
@@ -85,69 +79,79 @@ export class DPaySigner {
     });
   }
 
-  // ─── Private helpers ─────────────────────────────────────────────────────
+  // ─── Execution Engine ──────────────────────────────────────────────────────
 
-  /** Submits a single transaction. */
-  private async signAndSend(tx: PreparedTx): Promise<TxResult> {
-    const results = await this.signAndSendBatch([tx]);
-    return results[0];
-  }
-
-  /** Submits multiple transactions back-to-back, then waits for all to mine. */
-  private async signAndSendBatch(txs: PreparedTx[]): Promise<TxResult[]> {
+  /**
+   * Locks the queue, runs any necessary on-chain checks, broadcasts the txs,
+   * and immediately releases the lock BEFORE waiting for mining to allow max throughput.
+   */
+  private async runInQueue<T>(
+      buildAndBroadcast: () => Promise<{ responses: ethers.TransactionResponse[], data: T }>
+  ): Promise<{ receipts: TxResult[], data: T }> {
     const currentQueue = this.txQueue;
-    const txResponses: ethers.TransactionResponse[] = [];
 
-    // 1. Broadcast phase (Serialized queue)
-    this.txQueue = (async () => {
+    // 1. THE LOCK: State reads and broadcasts happen strictly one-at-a-time
+    const broadcastPromise = (async () => {
       await currentQueue.catch(() => {});
-      const startNonce = await this.allocateNonces(txs.length);
 
       try {
-        for (let i = 0; i < txs.length; i++) {
-          const tx = txs[i];
-          const response = await this.signer.sendTransaction({
-            to: tx.to,
-            data: tx.data,
-            nonce: startNonce + i,
-            value: tx.value && BigInt(tx.value) > 0n ? tx.value : undefined,
-            chainId: tx.chainId,
-          });
-          txResponses.push(response);
+        return await buildAndBroadcast();
+      } catch (error) {
+        if (this.signer instanceof NonceManager) {
+          this.signer.reset();
         }
-      } catch (err) {
-        throw err;
+        throw error;
       }
     })();
 
-    await this.txQueue; // Wait for broadcasts to finish
+    // CRITICAL: chain the next caller onto this broadcast so the queue stays alive.
+    this.txQueue = broadcastPromise;
 
-    // 2. Mining phase — each tx gets its own independent 120s timeout
+    const { responses: broadcastResponses, data: extraData } = await broadcastPromise;
+
+    // 2. CONCURRENT MINING: Wait for blocks asynchronously
     const receipts = await Promise.all(
-      txResponses.map(res => Promise.race([
-        res.wait(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`tx ${res.hash} unconfirmed after 120s`)),
-            120_000,
+        broadcastResponses.map(res => Promise.race([
+          res.wait(),
+          new Promise<never>((_, reject) =>
+              setTimeout(() => {
+                // NO RESET HERE. A timeout implies a mempool drop, not corrupted local logic.
+                // Requires application-level intervention to bump gas.
+                reject(new Error(`tx ${res.hash} unconfirmed after 120s`));
+              }, 120_000)
           ),
-        ),
-      ])),
+        ])),
     );
 
-    // 3. Check and return
-    return receipts.map((receipt, index) => {
+    // 3. Format and return results
+    const formattedReceipts = receipts.map((receipt, index) => {
       if (receipt?.status === 0) {
-        throw new Error(`Transaction reverted on-chain: ${txResponses[index].hash}`);
+        throw new Error(`Transaction reverted on-chain: ${broadcastResponses[index].hash}`);
       }
       return {
-        txHash: txResponses[index].hash,
+        txHash: broadcastResponses[index].hash,
         gasUsed: receipt?.gasUsed?.toString(),
         blockNumber: receipt?.blockNumber,
         status: receipt?.status ?? undefined,
         logs: receipt?.logs,
       };
     });
+
+    return { receipts: formattedReceipts, data: extraData };
+  }
+
+  /** Submits a single transaction using the queue engine. */
+  private async signAndSend(tx: PreparedTx): Promise<TxResult> {
+    const { receipts } = await this.runInQueue(async () => {
+      const response = await this.signer.sendTransaction({
+        to: tx.to,
+        data: tx.data,
+        value: tx.value && BigInt(tx.value) > 0n ? tx.value : undefined,
+        chainId: tx.chainId,
+      });
+      return { responses: [response], data: null };
+    });
+    return receipts[0];
   }
 
   // ─── Factory: create payment (ETH) ───────────────────────────────────────
@@ -159,26 +163,26 @@ export class DPaySigner {
     paymentId?: string;
   }): Promise<PaymentCreated> {
     const result = await this.dpayments.factory.prepareCreateEthPayment(
-      {
-        netAmount: params.netAmountWei,
-        payeeAddress: params.payeeAddress,
-        settlementTimeUnixSec: params.settlementTimeUnixSec,
-        paymentId: params.paymentId,
-      },
+        {
+          netAmount: params.netAmountWei,
+          payeeAddress: params.payeeAddress,
+          settlementTimeUnixSec: params.settlementTimeUnixSec,
+          paymentId: params.paymentId,
+        },
     );
     const tx = await this.signAndSend(result.tx);
 
     // Predict the deterministic clone address off-chain using the cached wallet address
     const paymentAddress = await this.dpayments.factory.predictAddress(
-      this.walletAddress,
-      {
-        id: result.paymentId,
-        payee: params.payeeAddress,
-        token: ethers.ZeroAddress,
-        amount: params.netAmountWei,
-        fee: result.fee,
-        settlementTime: params.settlementTimeUnixSec,
-      },
+        this.walletAddress,
+        {
+          id: result.paymentId,
+          payee: params.payeeAddress,
+          token: ethers.ZeroAddress,
+          amount: params.netAmountWei,
+          fee: result.fee,
+          settlementTime: params.settlementTimeUnixSec,
+        },
     );
 
     return {
@@ -205,32 +209,43 @@ export class DPaySigner {
     predictedAddress: string;
   }> {
     const result = await this.dpayments.factory.prepareCreateErc20Payment(
-      {
-        tokenAddress: params.tokenAddress,
-        netAmount: params.netAmountWei,
-        payeeAddress: params.payeeAddress,
-        settlementTimeUnixSec: params.settlementTimeUnixSec,
-        paymentId: params.paymentId,
-      },
+        {
+          tokenAddress: params.tokenAddress,
+          netAmount: params.netAmountWei,
+          payeeAddress: params.payeeAddress,
+          settlementTimeUnixSec: params.settlementTimeUnixSec,
+          paymentId: params.paymentId,
+        },
     );
 
-    // Read current allowance — skip approve if already sufficient
-    const { allowance: currentAllowance } = await this.readApprovalStatus(
-      params.tokenAddress, this.walletAddress, result.predictedAddress,
-    );
-    const needsApprove = BigInt(currentAllowance) < result.gross;
+    // Use the queue engine to lock the allowance check AND the broadcast together
+    const { receipts, data: { needsApprove } } = await this.runInQueue(async () => {
 
-    // Collect the transactions we need to broadcast
-    const txsToBroadcast: PreparedTx[] = [];
-    if (needsApprove) txsToBroadcast.push(result.approveTx);
-    txsToBroadcast.push(result.createTx);
+      const { allowance: currentAllowance } = await this.readApprovalStatus(
+          params.tokenAddress, this.walletAddress, result.predictedAddress,
+      );
+      const needsApprove = BigInt(currentAllowance) < result.gross;
 
-    // Send them through the batched pipeline
-    const txResults = await this.signAndSendBatch(txsToBroadcast);
+      const txsToBroadcast: PreparedTx[] = [];
+      if (needsApprove) txsToBroadcast.push(result.approveTx);
+      txsToBroadcast.push(result.createTx);
+
+      const responses: ethers.TransactionResponse[] = [];
+      for (const tx of txsToBroadcast) {
+        responses.push(await this.signer.sendTransaction({
+          to: tx.to,
+          data: tx.data,
+          value: tx.value && BigInt(tx.value) > 0n ? tx.value : undefined,
+          chainId: tx.chainId,
+        }));
+      }
+
+      return { responses, data: { needsApprove } };
+    });
 
     return {
-      approveTx: needsApprove ? txResults[0] : undefined,
-      createTx: needsApprove ? txResults[1] : txResults[0],
+      approveTx: needsApprove ? receipts[0] : undefined,
+      createTx: needsApprove ? receipts[1] : receipts[0],
       paymentId: result.paymentId,
       grossAmountWei: result.gross.toString(),
       predictedAddress: result.predictedAddress,
@@ -245,25 +260,20 @@ export class DPaySigner {
   }
 
   // ─── Read ERC20 allowance + balance ──────────────────────────────────────
-  //
-  // TODO: Move into @rakelabs/dpayments-sdk PaymentReader as
-  //       readErc20Allowance(token, owner, spender) so ABI defs live
-  //       in the SDK, not here.
-  // ──────────────────────────────────────────────────────────────────────────
 
   async readApprovalStatus(tokenAddress: string, ownerAddress: string, spenderAddress: string): Promise<{ allowance: string; balance: string }> {
     const erc20 = new ethers.Contract(
-      tokenAddress,
-      [
-        'function allowance(address,address) view returns (uint256)',
-        'function balanceOf(address) view returns (uint256)',
-      ],
-      this.provider,
+        tokenAddress,
+        [
+          'function allowance(address,address) view returns (uint256)',
+          'function balanceOf(address) view returns (uint256)',
+        ],
+        this.provider,
     );
     const [allowance, balance] = await Promise.all([
-      erc20.allowance(ownerAddress, spenderAddress),
-      erc20.balanceOf(ownerAddress),
-    ] as const);
+      await erc20.allowance(ownerAddress, spenderAddress) as Promise<bigint>,
+      await erc20.balanceOf(ownerAddress) as Promise<bigint>,
+    ]);
     return {
       allowance: allowance.toString(),
       balance: balance.toString(),
@@ -287,7 +297,7 @@ export class DPaySigner {
   // ─── Bound payment: raise dispute ─────────────────────────────────────────
 
   async raiseDispute(
-    paymentAddress: string,
+      paymentAddress: string,
   ): Promise<TxResult & { arbFeeWei: string }> {
     const dPayment = this.dpayments.dPayment(paymentAddress);
     const result = await dPayment.prepareRaiseDispute();
@@ -300,8 +310,8 @@ export class DPaySigner {
   // ─── Bound payment: submit evidence ───────────────────────────────────────
 
   async submitEvidence(
-    paymentAddress: string,
-    evidenceUri: string,
+      paymentAddress: string,
+      evidenceUri: string,
   ): Promise<TxResult> {
     const dPayment = this.dpayments.dPayment(paymentAddress);
     return this.signAndSend(dPayment.submitEvidence(evidenceUri));
@@ -310,8 +320,8 @@ export class DPaySigner {
   // ─── Bound payment: appeal a ruling ───────────────────────────────────────
 
   async appeal(
-    paymentAddress: string,
-    extraData?: string,
+      paymentAddress: string,
+      extraData?: string,
   ): Promise<TxResult & { appealFeeWei: string }> {
     const dPayment = this.dpayments.dPayment(paymentAddress);
     const result = await dPayment.prepareAppeal(extraData);
@@ -321,19 +331,4 @@ export class DPaySigner {
     };
   }
 
-  // ─── ERC20 approval ──────────────────────────────────────────────────────
-
-  async erc20Approve(
-    tokenAddress: string,
-    spenderAddress: string,
-    amountWei: bigint,
-  ): Promise<TxResult> {
-    return this.signAndSend(
-      this.dpayments.factory.erc20Approve({
-        tokenAddress,
-        spenderAddress,
-        amount: amountWei,
-      }),
-    );
-  }
 }
