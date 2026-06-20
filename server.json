@@ -1,0 +1,72 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.programmaman/dpay-mcp",
+  "description": "An MCP server for creating, settling, disputing, and refunding escrows on EVM chains.",
+  "repository": {
+    "url": "https://github.com/programmaman/dpay-mcp",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@rakelabs/dpay-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "RPC_URL",
+          "description": "EVM RPC endpoint URL",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CHAIN_ID",
+          "description": "EVM chain ID (e.g. 1 for Ethereum mainnet)",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "PRIVATE_KEY",
+          "description": "Private key for the wallet that signs transactions",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "ALLOWED_TOKENS",
+          "description": "Spending limits: address|alias:budget:maxTxValue,...",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "MIN_SETTLEMENT_WINDOW_SEC",
+          "description": "Minimum settlement window in seconds",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "POLICY_WEBHOOK_URL",
+          "description": "Optional policy compliance webhook URL",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "POLICY_WEBHOOK_TOKEN",
+          "description": "Bearer token for the policy webhook",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
+

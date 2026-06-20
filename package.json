@@ -11,6 +11,7 @@
   "bugs": {
     "url": "https://github.com/programmaman/dpay-mcp/issues"
   },
+  "mcpName": "io.github.programmaman/dpay-mcp",
   "engines": {
     "node": ">=20"
   },
