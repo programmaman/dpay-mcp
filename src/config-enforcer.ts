@@ -47,10 +47,10 @@ function resolveAddress(raw: string): string {
 // ═════════════════════════════════════════════════════════════════════
 
 export class ConfigEnforcer {
-  private _resolved = new Map<string, { budgetWei: bigint; maxTxValueWei: bigint }>();
+  private readonly _resolved = new Map<string, { budgetWei: bigint; maxTxValueWei: bigint }>();
   private _sessionSpent = new Map<string, bigint>();
   private _allowedTokens: AllowedTokenConfig[];
-  private _minSettlementWindowSec: bigint;
+  private readonly _minSettlementWindowSec: bigint;
 
   constructor(
     allowedTokens: AllowedTokenConfig[],
@@ -106,8 +106,9 @@ export class ConfigEnforcer {
     if (!raw) return undefined;
     try {
       const val = BigInt(raw);
-      if (val < 0n) throw new Error(`negative`);
-      return val;
+      if (val >= 0n) return val;
+      process.stderr.write(`[dpay-mcp] ⚠ Invalid ${key}="${raw}", treating as no minimum\n`);
+      return 0n;
     } catch {
       process.stderr.write(`[dpay-mcp] ⚠ Invalid ${key}="${raw}", treating as no minimum\n`);
       return 0n;
@@ -124,11 +125,6 @@ export class ConfigEnforcer {
   /** Configured minimum settlement window in seconds. */
   get minSettlementWindowSec(): bigint {
     return this._minSettlementWindowSec;
-  }
-
-  /** True if any limit is configured. */
-  get hasLimits(): boolean {
-    return this._allowedTokens.length > 0 || this._minSettlementWindowSec > 0n;
   }
 
   /** Human-readable limits enriched with token symbols for LLM consumption. */

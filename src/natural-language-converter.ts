@@ -59,9 +59,9 @@ export class NaturalLanguageToChainConverter {
 
     const token = new ethers.Contract(address, ERC20_DETAILS_ABI, this.provider);
     const [decimalsResult, nameResult, symbolResult] = await Promise.allSettled([
-      token.decimals() as Promise<number>,
-      token.name() as Promise<string>,
-      token.symbol() as Promise<string>,
+      await token.decimals() as Promise<number>,
+      await token.name() as Promise<string>,
+      await token.symbol() as Promise<string>,
     ]);
 
     const details: TokenDetails = {
