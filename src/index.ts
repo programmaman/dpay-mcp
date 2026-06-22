@@ -187,11 +187,11 @@ async function main(): Promise<void> {
   server.registerTool(
       'whoami',
       {
-        description:
-            'Use this to discover which wallet and chain you are operating on. ' +
-            'Returns your wallet address, chain ID, the payment factory address, ' +
-            'and spending limits.  ' +
-            'Usage: { }',
+        description: [
+          'Discover the current wallet, chain, factory address, and spending limits.',
+          'Call exactly as:',
+          '{"tool":"whoami","args":{}}',
+        ].join('\n'),
         inputSchema: PingSchema,
       },
       async () => {
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
       {
         description:
             'Creates an ETH payment contract. ONLY for ETH — do NOT use for USDC or other ERC20 tokens. ' +
-            'Usage: { payeeAddress: <RECIPIENT_ADDRESS>, etherAmount: <AMOUNT>, settlementWindowSec: <SECONDS> }',
+            'Call exactly as: {"tool":"eth_create_payment","args":{"payeeAddress":"0x...","etherAmount":"0.01","settlementWindowSec":"86400"}}',
         inputSchema: CreatePaymentSchema,
       },
         async (args: Record<string, unknown>) => {
@@ -267,7 +267,11 @@ async function main(): Promise<void> {
   server.registerTool(
       'payment_info',
       {
-        description: 'Returns the full on-chain state for a payment: current state, payer, payee, amount, token, settlement deadline. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
+        description: [
+          'Read the on-chain state for a payment.',
+          'Call exactly as:',
+          '{"tool":"payment_info","args":{"paymentAddress":"0x..."}}',
+        ].join('\n'),
         inputSchema: PaymentAddressSchema,
       },
       async (args: Record<string, unknown>) => {
@@ -292,7 +296,11 @@ async function main(): Promise<void> {
   server.registerTool(
       'raise_dispute',
       {
-        description: 'Raises a Kleros dispute (on-chain arbitration). Only valid when payment is PAID and settlement time has NOT passed. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
+        description: [
+          'Raise a Kleros dispute for a PAID payment before the settlement time passes.',
+          'Call exactly as:',
+          '{"tool":"raise_dispute","args":{"paymentAddress":"0x..."}}',
+        ].join('\n'),
         inputSchema: PaymentAddressSchema,
       },
       async (args: Record<string, unknown>) => {
@@ -327,7 +335,11 @@ async function main(): Promise<void> {
   server.registerTool(
       'submit_evidence',
       {
-        description: 'Creates an evidence record and submits it to the dispute on-chain. Only valid when payment is DISPUTED. Usage: { paymentAddress: <PAYMENT_ADDRESS>, argument: <ARGUMENT> }',
+        description: [
+          'Publish evidence for an existing dispute.',
+          'Call exactly as:',
+          '{"tool":"submit_evidence","args":{"paymentAddress":"0x...","argument":"short factual explanation"}}',
+        ].join('\n'),
         inputSchema: SubmitEvidenceSchema,
       },
       async (args: Record<string, unknown>) => {
@@ -380,7 +392,12 @@ async function main(): Promise<void> {
   server.registerTool(
       'settle',
       {
-        description: 'Settle or claim the payment funds to your wallet after the settlement window has passed. Only the PAYEE can call this. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
+        description: [
+          'Claim payment funds after the settlement window has passed.',
+          'Only the payee should call this.',
+          'Call exactly as:',
+          '{"tool":"settle","args":{"paymentAddress":"0x..."}}',
+        ].join('\n'),
         inputSchema: PaymentAddressSchema,
       },
       async (args: Record<string, unknown>) => {
@@ -417,7 +434,12 @@ async function main(): Promise<void> {
   server.registerTool(
       'refund',
       {
-        description: 'Voluntarily send the funds back to the payer. Only the PAYEE can call this. Only valid when payment is in PAID status. Usage: { paymentAddress: <PAYMENT_ADDRESS> }',
+        description: [
+          'Voluntarily send the funds back to the payer.',
+          'Only the payee should call this.',
+          'Call exactly as:',
+          '{"tool":"refund","args":{"paymentAddress":"0x..."}}',
+        ].join('\n'),
         inputSchema: PaymentAddressSchema,
       },
       async (args: Record<string, unknown>) => {
@@ -453,9 +475,9 @@ async function main(): Promise<void> {
       'erc20_create_payment',
       {
         description:
-            'Creates an ERC20 payment contract. Handles token approval + deployment in one atomic step. ' +
+            'Creates an ERC20 payment contract.' +
             'ONLY for ERC20 tokens — do NOT use for ETH. ' +
-            'Usage: { tokenAddress: <TOKEN_ADDRESS>, payeeAddress: <RECIPIENT_ADDRESS>, tokenAmount: <AMOUNT>, settlementWindowSec: <SECONDS> }',
+            'Call exactly as: {"tool":"erc20_create_payment","args":{"tokenAddress":"0x...","payeeAddress":"0x...","tokenAmount":"1","settlementWindowSec":"86400"}}',
         inputSchema: CreateErc20PaymentSchema,
       },
       async (args: Record<string, unknown>) => {

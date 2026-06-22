@@ -154,6 +154,7 @@ worker.on('error', (err: unknown) => {
 
 worker.on('exit', (code) => {
   process.stderr.write(`[dpay-mcp] evidence-publisher: worker exited with code ${code}\n`);
+  isReady = false;
   rejectReady(new Error(`Worker exited with code ${code}`));
   // Reject all pending requests
   for (const [id, entry] of pending) {

@@ -28,6 +28,7 @@ export class NaturalLanguageToChainConverter {
 
   constructor(private provider: ethers.Provider) {}
 
+
   // ─── ETH ────────────────────────────────────────────────────────────────
 
   /**
@@ -58,10 +59,14 @@ export class NaturalLanguageToChainConverter {
     }
 
     const token = new ethers.Contract(address, ERC20_DETAILS_ABI, this.provider);
+    const decimalsPromise = Promise.resolve().then(() => token.decimals() as Promise<number>);
+    const namePromise = Promise.resolve().then(() => token.name() as Promise<string>);
+    const symbolPromise = Promise.resolve().then(() => token.symbol() as Promise<string>);
+
     const [decimalsResult, nameResult, symbolResult] = await Promise.allSettled([
-      await token.decimals() as Promise<number>,
-      await token.name() as Promise<string>,
-      await token.symbol() as Promise<string>,
+      decimalsPromise,
+      namePromise,
+      symbolPromise,
     ]);
 
     const details: TokenDetails = {
