@@ -51,9 +51,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@rakelabs/dpayments-sdk": "^0.1.0",
-    "@rakelabs/evidence-publisher": "^0.1.0",
-    "ethers": "^6.10.0",
+    "@rakelabs/dpayments-sdk": "^0.1.1",
+    "@rakelabs/evidence-publisher": "^0.1.1",
+    "ethers": "^6.17.0",
     "express": "^5.2.1",
     "json5": "^2.2.3",
     "ws": "^8.21.0",
