@@ -3,7 +3,7 @@ import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/', 'dist-test/', 'node_modules/', 'coverage/', 'generated/', 'test/', 'ui/', 'mcp-docs/'] },
+  { ignores: ['dist/', 'dist-test/', 'node_modules/', 'coverage/', 'generated/', 'ui/', 'mcp-docs/', 'test/'] },
 
   {
     extends: [eslint.configs.recommended],
@@ -15,7 +15,7 @@ export default tseslint.config(
   },
 
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'test/**/*.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
