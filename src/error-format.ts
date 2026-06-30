@@ -15,6 +15,9 @@
 
 import { decodeDPaymentError } from '@rakelabs/dpayments-sdk';
 import { Interface } from 'ethers';
+import { logger as baseLogger } from './logger.js';
+
+const logger = baseLogger.child({ component: 'error-format' });
 
 // -- Additional errors not yet in the SDK -- OpenZeppelin ERC20 suite -------
 
@@ -49,7 +52,7 @@ function decodeCombined(data: string): { error: string; args: Record<string, unk
   } catch {
     // Unknown revert selector -- log so we know what to add
     const selector = data.length >= 10 ? data.slice(0, 10) : data;
-    process.stderr.write(`[dpay-mcp] unknown revert selector ${selector}\n`);
+    logger.debug({ selector }, 'Unknown revert selector');
     return null;
   }
 }

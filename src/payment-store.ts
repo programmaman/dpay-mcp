@@ -2,6 +2,9 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { logger as baseLogger } from './logger.js';
+
+const logger = baseLogger.child({ component: 'payment-store' });
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -75,7 +78,7 @@ export class PaymentStore {
       }
     } catch (err) {
       // Corrupted file — start fresh
-      process.stderr.write(`[dpay-mcp] ⚠ Failed to load payments.json: ${String(err)}\n`);
+      logger.warn({ err, filePath: this.filePath }, 'Failed to load payments store; starting with an empty store');
     }
   }
 
@@ -87,7 +90,7 @@ export class PaymentStore {
       }
       await writeFile(this.filePath, JSON.stringify(obj, null, 2), 'utf8');
     } catch (err) {
-      process.stderr.write(`[dpay-mcp] ⚠ Failed to write payments.json: ${String(err)}\n`);
+      logger.warn({ err, filePath: this.filePath }, 'Failed to write payments store');
     }
   }
 }

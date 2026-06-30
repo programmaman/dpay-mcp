@@ -10,6 +10,9 @@
 
 import { ethers } from 'ethers';
 import { NaturalLanguageToChainConverter } from './natural-language-converter.js';
+import { logger as baseLogger } from './logger.js';
+
+const logger = baseLogger.child({ component: 'config-enforcer' });
 
 // ─── Types ─────────────────────────────────────────────────────────
 
@@ -67,9 +70,12 @@ export class ConfigEnforcer {
     const allowedTokens = ConfigEnforcer.parseAllowedTokensEnv();
     const minSettlementWindowSec = ConfigEnforcer.parseSec('MIN_SETTLEMENT_WINDOW_SEC');
 
-    process.stderr.write(
-      `[dpay-mcp] Spending limits: tokens=${allowedTokens.length} ` +
-      `minSettlementWindow=${minSettlementWindowSec || 'none'}\n`,
+    logger.info(
+      {
+        tokenCount: allowedTokens.length,
+        minSettlementWindowSec: minSettlementWindowSec?.toString() ?? null,
+      },
+      'Loaded spending limits',
     );
 
     return new ConfigEnforcer(allowedTokens, converter, minSettlementWindowSec);
@@ -107,10 +113,10 @@ export class ConfigEnforcer {
     try {
       const val = BigInt(raw);
       if (val >= 0n) return val;
-      process.stderr.write(`[dpay-mcp] ⚠ Invalid ${key}="${raw}", treating as no minimum\n`);
+      logger.warn({ envVar: key, value: raw }, 'Invalid minimum settlement window; treating as no minimum');
       return 0n;
     } catch {
-      process.stderr.write(`[dpay-mcp] ⚠ Invalid ${key}="${raw}", treating as no minimum\n`);
+      logger.warn({ envVar: key, value: raw }, 'Invalid minimum settlement window; treating as no minimum');
       return 0n;
     }
   }

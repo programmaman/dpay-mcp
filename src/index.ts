@@ -12,13 +12,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { publishEvidence, warmUp, closeWorker } from './evidence-client.js';
 import { formatRevert } from './error-format.js';
 import { checkPolicy } from './policy-webhook.js';
+import { logger as baseLogger, formatError, redactAddress, redactHex } from './logger.js';
 
-// ─── Stderr logger ─────────────────────────────────────────────────────────
-const logger = {
-  info: (msg: string) => process.stderr.write(`[dpay-mcp] ${msg}\n`),
-  warn: (msg: string) => process.stderr.write(`[dpay-mcp] ⚠ ${msg}\n`),
-  error: (msg: string) => process.stderr.write(`[dpay-mcp] ✗ ${msg}\n`),
-};
+const logger = baseLogger.child({ component: 'server' });
 
 // ─── Evidence publisher ────────────────────────────────────────────────
 // Helia runs in a dedicated worker thread.  The evidence-client module spawns
@@ -66,17 +62,17 @@ async function main(): Promise<void> {
   const explicitPrivateKey = process.env.PRIVATE_KEY; // optional — omit for self-generated
 
   if (!rpcUrl) {
-    logger.error('Missing RPC_URL environment variable');
+    logger.error({ envVar: 'RPC_URL' }, 'Missing required environment variable');
     process.exit(1);
   }
   if (!rawChainId) {
-    logger.error('Missing CHAIN_ID environment variable');
+    logger.error({ envVar: 'CHAIN_ID' }, 'Missing required environment variable');
     process.exit(1);
   }
 
   const chainId = Number(rawChainId);
   if (!Number.isInteger(chainId) || chainId <= 0) {
-    logger.error(`CHAIN_ID must be a positive integer, got: ${rawChainId}`);
+    logger.error({ rawChainId }, 'CHAIN_ID must be a positive integer');
     process.exit(1);
   }
 
@@ -86,9 +82,9 @@ async function main(): Promise<void> {
       : ethers.Wallet.createRandom();
 
   if (explicitPrivateKey) {
-    logger.info(`wallet=${wallet.address}`);
+    logger.info({ walletAddress: wallet.address }, 'Using configured wallet');
   } else {
-    logger.info(`wallet=${wallet.address} (auto-generated)`);
+    logger.info({ walletAddress: wallet.address }, 'Using auto-generated wallet');
 
     // Persist the key to disk so the human can recover it later.
     // The key file is never exposed through any MCP tool or resource.
@@ -97,11 +93,11 @@ async function main(): Promise<void> {
     try {
       mkdirSync(keyDir, { recursive: true });
       writeFileSync(keyPath, wallet.privateKey, { mode: 0o600 });
-      logger.info(`wallet key saved to ${keyPath}`);
-      logger.info(`  → Set PRIVATE_KEY env var on next server start to reuse this wallet`);
+      logger.info({ keyPath }, 'Auto-generated wallet key saved');
+      logger.info({ envVar: 'PRIVATE_KEY' }, 'Set PRIVATE_KEY on next server start to reuse this wallet');
     } catch (err) {
-      logger.warn(`could not save wallet key to ${keyPath}: ${String(err)}`);
-      logger.warn(`  → SAVE THIS KEY TO REUSE THIS WALLET: ${wallet.privateKey}`);
+      logger.warn({ err, keyPath }, 'Could not save auto-generated wallet key');
+      logger.warn('Auto-generated wallet key was not persisted; set PRIVATE_KEY explicitly before using this wallet for funded transactions');
     }
   }
 
@@ -109,7 +105,7 @@ async function main(): Promise<void> {
   const signer = new DPaySigner({ signer: wallet, walletAddress: wallet.address, rpcUrl, chainId });
   const converter = new NaturalLanguageToChainConverter(signer.provider);
   const store = new PaymentStore();
-  logger.info(`connected chainId=${chainId} factory=${signer.factoryAddress}`);
+  logger.info({ chainId, walletAddress: wallet.address, factoryAddress: signer.factoryAddress }, 'Connected to chain');
 
   // ── Server config ───────────────────────────────────────────────────────
   const enforcer = ConfigEnforcer.fromEnv(converter);
@@ -226,7 +222,16 @@ async function main(): Promise<void> {
           const net = converter.ethToWei(parsed.etherAmount);
           const { blockNumber, blockTs, settlementTimeUnixSec } = await converter.settlementTimestamp(parsed.settlementWindowSec);
           await enforcer.validate({ netAmountWei: net, settlementTimeUnixSec }, ethers.ZeroAddress);
-          logger.info(`eth_create_payment: block=${blockNumber} ts=${blockTs} settlement=${settlementTimeUnixSec}`);
+          logger.info(
+            {
+              tool: 'eth_create_payment',
+              blockNumber,
+              blockTimestamp: blockTs,
+              settlementTimeUnixSec,
+              payeeAddress: redactAddress(parsed.payeeAddress),
+            },
+            'Creating ETH payment',
+          );
 
           const result = await signer.createEthPayment({
             payeeAddress: parsed.payeeAddress,
@@ -348,14 +353,31 @@ async function main(): Promise<void> {
           const policy = await checkPolicy('submit_evidence', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
           const argument = parsed.argument ?? 'No additional details provided.';
-          logger.info(`submit_evidence: address=${parsed.paymentAddress}${parsed.argument ? ` argument=${parsed.argument}` : ''}`);
+          logger.info(
+            {
+              tool: 'submit_evidence',
+              paymentAddress: redactAddress(parsed.paymentAddress),
+              hasArgument: Boolean(parsed.argument),
+              argumentLength: parsed.argument?.length ?? 0,
+            },
+            'Publishing evidence document',
+          );
 
           // 1. Publish evidence document via the evidence publisher (Helia IPFS)
           const { uri, cid, selfHash } = await publishEvidence(
             `Dispute evidence — ${parsed.paymentAddress}`,
             argument,
           );
-          logger.info(`submit_evidence: published evidence doc → ${uri}`);
+          logger.info(
+            {
+              tool: 'submit_evidence',
+              paymentAddress: redactAddress(parsed.paymentAddress),
+              evidenceUri: uri,
+              evidenceCid: cid,
+              selfHash: redactHex(selfHash),
+            },
+            'Published evidence document',
+          );
 
           // 2. Store the URI locally
           const existing = store.get(parsed.paymentAddress);
@@ -405,10 +427,25 @@ async function main(): Promise<void> {
           const parsed = PaymentAddressSchema.parse(args);
           const policy = await checkPolicy('settle', args, wallet.address, chainId);
           if (!policy.allowed) return { content: [{ type: 'text', text: `Policy denied: ${policy.reason}` }], isError: true };
-          logger.info(`settle: paymentAddress=${parsed.paymentAddress}`);
-          logger.info(`settle: signer wallet=${wallet.address}`);
+          logger.info(
+            {
+              tool: 'settle',
+              paymentAddress: redactAddress(parsed.paymentAddress),
+              walletAddress: wallet.address,
+            },
+            'Settling payment',
+          );
           const result = await signer.settle(parsed.paymentAddress);
-          logger.info(`settle: txHash=${result.txHash} block=${result.blockNumber} gasUsed=${result.gasUsed}`);
+          logger.info(
+            {
+              tool: 'settle',
+              paymentAddress: redactAddress(parsed.paymentAddress),
+              txHash: result.txHash,
+              blockNumber: result.blockNumber,
+              gasUsed: result.gasUsed,
+            },
+            'Settled payment',
+          );
 
           await store.upsert(parsed.paymentAddress, { state: 'SETTLED' });
 
@@ -488,7 +525,17 @@ async function main(): Promise<void> {
           const net = await converter.erc20ToBaseUnits(parsed.tokenAddress, parsed.tokenAmount);
           const { blockNumber, blockTs, settlementTimeUnixSec } = await converter.settlementTimestamp(parsed.settlementWindowSec);
           await enforcer.validate({ netAmountWei: net, settlementTimeUnixSec }, parsed.tokenAddress);
-          logger.info(`erc20_create_payment: block=${blockNumber} ts=${blockTs} settlement=${settlementTimeUnixSec}`);
+          logger.info(
+            {
+              tool: 'erc20_create_payment',
+              blockNumber,
+              blockTimestamp: blockTs,
+              settlementTimeUnixSec,
+              tokenAddress: redactAddress(parsed.tokenAddress),
+              payeeAddress: redactAddress(parsed.payeeAddress),
+            },
+            'Creating ERC20 payment',
+          );
 
           const result = await signer.createErc20Payment({
             tokenAddress: parsed.tokenAddress,
@@ -533,16 +580,16 @@ async function main(): Promise<void> {
 
   // Catch transport-level errors to prevent silent crashes
   transport.onerror = (error) => {
-    logger.error(`Transport error: ${error.message}`);
+    logger.error({ err: error }, 'Transport error');
   };
 
   // Catch protocol-level errors (malformed JSON-RPC, etc.)
   server.server.onerror = (error: Error) => {
-    logger.error(`Server error: ${error.message}`);
+    logger.error({ err: error }, 'Server error');
   };
 
   await server.connect(transport);
-  logger.info('dpay-mcp server running on stdio');
+  logger.info({ transport: 'stdio' }, 'dpay-mcp server running');
 
   // Fire up Helia in the worker thread so it's ready by the time the
   // LLM chats through a few turns and calls submit_evidence.
@@ -550,13 +597,13 @@ async function main(): Promise<void> {
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    logger.warn(`Received ${signal}. Shutting down...`);
+    logger.warn({ signal }, 'Received shutdown signal');
     try {
       await server.close();
       await closeWorker();
       process.exit(0);
     } catch (err) {
-      logger.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
+      logger.error({ err }, 'Shutdown error');
       process.exit(1);
     }
   };
@@ -566,11 +613,10 @@ async function main(): Promise<void> {
 }
 
 process.on('unhandledRejection', (reason: unknown) => {
-  logger.error(`Unhandled Rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
+  logger.error({ reason: formatError(reason), err: reason }, 'Unhandled rejection');
 });
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  logger.error('Fatal server error: ' + message);
+  logger.error({ err: error }, 'Fatal server error');
   process.exit(1);
 });

@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { logger as baseLogger } from './logger.js';
+
+const logger = baseLogger.child({ component: 'evidence-client' });
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -22,7 +25,7 @@ export interface PublishedEvidence {
 // ─── Worker message types ────────────────────────────────────────────────────
 
 type WorkerIncomingMessage =
-  | { type: 'log'; msg: string }
+  | { type: 'log'; level?: 'debug' | 'info' | 'warn' | 'error'; msg: string }
   | { type: 'error'; id?: string; error: string }
   | { type: 'publish-done'; id: string; uri: string; cid: string; selfHash: string }
   | { type: 'ready' }
@@ -97,7 +100,20 @@ worker.on('message', (raw: unknown) => {
 
   // Log messages from worker go to stderr
   if (msg.type === 'log') {
-    process.stderr.write(`[dpay-mcp] evidence-publisher: ${msg.msg}\n`);
+    const logContext = { workerMessage: msg.msg };
+    switch (msg.level) {
+      case 'debug':
+        logger.debug(logContext, 'Evidence publisher worker log');
+        break;
+      case 'warn':
+        logger.warn(logContext, 'Evidence publisher worker log');
+        break;
+      case 'error':
+        logger.error(logContext, 'Evidence publisher worker log');
+        break;
+      default:
+        logger.info(logContext, 'Evidence publisher worker log');
+    }
     return;
   }
 
@@ -109,10 +125,10 @@ worker.on('message', (raw: unknown) => {
         pending.delete(id);
         entry.reject(new Error(msg.error));
       } else {
-        process.stderr.write(`[dpay-mcp] evidence-publisher: ✗ ${msg.error}\n`);
+        logger.error({ requestId: id, errorMessage: msg.error }, 'Evidence publisher returned error for unknown request');
       }
     } else {
-      process.stderr.write(`[dpay-mcp] evidence-publisher: ✗ ${msg.error}\n`);
+      logger.error({ errorMessage: msg.error }, 'Evidence publisher returned error');
     }
     return;
   }
@@ -132,14 +148,14 @@ worker.on('message', (raw: unknown) => {
   }
 
   if (msg.type === 'ready') {
-    process.stderr.write(`[dpay-mcp] evidence-publisher: worker ready\n`);
+    logger.info('Evidence publisher worker ready');
     isReady = true;
     readyResolve?.();
     return;
   }
 
   if (msg.type === 'init-error') {
-    process.stderr.write(`[dpay-mcp] evidence-publisher: init failed: ${msg.error}\n`);
+    logger.error({ errorMessage: msg.error }, 'Evidence publisher worker initialization failed');
     // Worker is still alive — reset the gate so a new warmUp/init cycle can retry.
     isReady = false;
     rejectReady(new Error(`Worker init failed: ${msg.error}`));
@@ -148,12 +164,11 @@ worker.on('message', (raw: unknown) => {
 });
 
 worker.on('error', (err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`[dpay-mcp] evidence-publisher: worker error: ${msg}\n`);
+  logger.error({ err }, 'Evidence publisher worker error');
 });
 
 worker.on('exit', (code) => {
-  process.stderr.write(`[dpay-mcp] evidence-publisher: worker exited with code ${code}\n`);
+  logger.warn({ exitCode: code }, 'Evidence publisher worker exited');
   isReady = false;
   rejectReady(new Error(`Worker exited with code ${code}`));
   // Reject all pending requests

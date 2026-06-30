@@ -6,21 +6,19 @@
  * When no URL is configured, all requests are allowed (zero overhead).
  */
 
+import { logger as baseLogger, formatError } from './logger.js';
+
 // ─── Config (loaded once at module init) ─────────────────────────────────
 
 const policyWebhookUrl = process.env['POLICY_WEBHOOK_URL'] ?? '';
 const policyWebhookToken = process.env['POLICY_WEBHOOK_TOKEN'] ?? '';
+const logger = baseLogger.child({ component: 'policy-webhook' });
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export interface PolicyCheckResult {
   allowed: boolean;
   reason?: string;
-}
-
-function log(level: 'info' | 'warn' | 'error', msg: string): void {
-  const prefix = level === 'error' ? '✗' : level === 'warn' ? '⚠' : '';
-  process.stderr.write(`[dpay-mcp] ${prefix} ${msg}\n`);
 }
 
 // ─── Check ────────────────────────────────────────────────────────────────
@@ -60,7 +58,7 @@ export async function checkPolicy(
     });
 
     if (!res.ok) {
-      log('warn', `Policy webhook returned ${res.status} — denying request`);
+      logger.warn({ tool, statusCode: res.status }, 'Policy webhook denied request with non-OK response');
       return { allowed: false, reason: `Policy check failed (HTTP ${res.status})` };
     }
 
@@ -71,13 +69,13 @@ export async function checkPolicy(
       : (typeof result['reason'] === 'string' ? result['reason'] : 'Blocked by corporate policy.');
 
     if (!isAllowed) {
-      log('warn', `Policy webhook denied request to ${tool}. Reason: ${reason}`);
+      logger.warn({ tool, reason }, 'Policy webhook denied request');
     }
 
     return { allowed: isAllowed, reason };
 
-  } catch {
-    log('error', `Policy webhook error or timeout — denying request to ${tool}`);
+  } catch (err) {
+    logger.error({ tool, err, reason: formatError(err) }, 'Policy webhook error or timeout; denying request');
     return { allowed: false, reason: 'Policy check unreachable or timed out.' };
   }
 }

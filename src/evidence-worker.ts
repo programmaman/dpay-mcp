@@ -15,11 +15,11 @@ if (!parentPort) {
 
 process.on('unhandledRejection', (reason) => {
   const msg = reason instanceof Error ? reason.message : String(reason);
-  log(`Unhandled rejection in background task: ${msg}`);
+  log('error', `Unhandled rejection in background task: ${msg}`);
 });
 
 process.on('uncaughtException', (err) => {
-  log(`Uncaught exception: ${err.message}`);
+  log('error', `Uncaught exception: ${err.message}`);
   process.exit(1);
 });
 
@@ -28,8 +28,10 @@ process.on('uncaughtException', (err) => {
 let publisher: Awaited<ReturnType<typeof createInstance>> | undefined;
 let readyPromise: Promise<void> | null = null;
 
-function log(msg: string): void {
-  parentPort!.postMessage({ type: 'log', msg });
+type WorkerLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+function log(level: WorkerLogLevel, msg: string): void {
+  parentPort!.postMessage({ type: 'log', level, msg });
 }
 
 async function createInstance() {
@@ -77,7 +79,7 @@ async function createInstance() {
   }
 
   // Default: in-process Helia
-  log('no EVIDENCE_IPFS_ENDPOINT set, starting in-process Helia');
+  log('info', 'no EVIDENCE_IPFS_ENDPOINT set, starting in-process Helia');
   return createEvidencePublisher({
     config: {
       addressing: 'content',
@@ -100,12 +102,12 @@ async function ensureReady(): Promise<void> {
   if (readyPromise) return readyPromise;
 
   const t0 = Date.now();
-  log('initializing...');
+  log('info', 'initializing...');
 
   readyPromise = (async () => {
     try {
       publisher = await withTimeout(createInstance());
-      log(`ready in ${Date.now() - t0}ms`);
+      log('info', `ready in ${Date.now() - t0}ms`);
     } catch (err) {
       publisher = undefined;
       throw err;
@@ -189,7 +191,7 @@ async function handleMessage(msg: WorkerIncomingMessage): Promise<void> {
         }
       } catch (closeErr) {
         const closeMsg = closeErr instanceof Error ? closeErr.message : String(closeErr);
-        log(`Warning: Helia failed to close cleanly: ${closeMsg}`);
+        log('warn', `Helia failed to close cleanly: ${closeMsg}`);
       } finally {
         // Always exit the process, even if closing the datastore failed
         parentPort!.postMessage({ type: 'closed' });
